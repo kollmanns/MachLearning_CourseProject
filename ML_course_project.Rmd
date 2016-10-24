@@ -1,0 +1,146 @@
+---
+title: 'Practical Machine Learning: Course Project'
+author: "seb"
+date: "24 Oktober 2016"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+Course Project for Coursera **Practical Machine Learning** Class.
+
+### Background
+Using devices such as *Jawbone Up*, *Nike FuelBand*, and *Fitbit* it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how *much* of a particular activity they do, but they rarely quantify *how well they do it*. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+### Source
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. **Qualitative Activity Recognition of Weight Lifting Exercises.** *Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13)*. Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Read more: http://groupware.les.inf.puc-rio.br/har
+
+### Goal
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. We may use any of the other variables to predict with. We should create a report describing how you built your model, how we used cross validation, what we think the expected out of sample error is, and why we made the choices we did. We will also use your prediction model to predict 20 different test cases at the end.
+
+## Data Acquisition
+Loading necessary libraries.
+```{r, message=FALSE, warning=FALSE}
+library(caret)
+library(randomForest)
+library(gbm)
+```
+
+Getting and saving the data locally and load them into R.
+```{r, cache = TRUE}
+## load training data set
+name.file.train <- "pml-training.csv"
+
+if (!file.exists(name.file.train)) {
+  fileURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+  download.file(fileURL, name.file.train)
+}  
+
+data.train <- read.csv(name.file.train)
+
+
+## load testing data set
+name.file.test <- "pml-testing.csv"
+
+if (!file.exists(name.file.test)) {
+  fileURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+  download.file(fileURL, name.file.test)
+}  
+
+data.test <- read.csv(name.file.test)
+```
+
+## Data Cleansing
+First we will split our train data into a training and a test set. The original test set will be used as a validation set.
+```{r, cache = TRUE}
+inTrain <- createDataPartition(data.train$classe, p = 0.7, list = FALSE)
+training <- data.train[inTrain, ]
+testing <- data.train[-inTrain, ]
+```
+We will remove the first seven columns as they are about the person and do not affect the class of the exercise.
+```{r, cache = TRUE}
+training <- training[,8:length(colnames(training))]
+dim(training)
+```
+Next we will remove Columns which show nearly no or not any variance, as they are useless to be used for predictions.
+```{r, cache = TRUE}
+NZV.Columns <- nearZeroVar(training)
+training <- training[, -NZV.Columns]
+dim(training)
+
+```
+Furthermore we are removing columns which are more than 80% empty as they do not help us much.
+```{r, cache = TRUE}
+NA.NumberOfNAs <- sapply(training, function(x) sum(is.na(x)))
+NA.ColumnsToRemove <- names(NA.NumberOfNAs[NA.NumberOfNAs/dim(training)[1] > 0.8])
+training <- training[ , !names(training) %in% NA.ColumnsToRemove]
+dim(training)
+```
+Finally, we apply the same to the test data sets as we only need the same columns.
+```{r, cache = TRUE}
+Columns.Remaining <- colnames(training)
+testing <- testing[, Columns.Remaining]
+dim(testing)
+
+data.test <- data.test[, Columns.Remaining[-length(Columns.Remaining)]]
+dim(data.test)
+```
+
+## Prediction: Random Forests
+```{r, cache = TRUE}
+model.rf <- train(classe ~ .,
+                  data = training,
+                  method="rf",
+                  trControl = trainControl(method = "cv", 5))
+
+prediction.rf <- predict(model.rf, newdata = testing)
+
+cfMatrix.rf <- confusionMatrix(prediction.rf, testing$classe)
+cfMatrix.rf
+```
+
+```{r, cache = TRUE}
+plot(cfMatrix.rf$table,
+     main = "Confusion Matrix - Random Forest",
+     sub = paste0("Accuracy: ", round(cfMatrix.rf$overall['Accuracy'], 4)))
+```
+
+## Prediction: Generalized Boosted Regression Model
+```{r, cache = TRUE}
+model.gbm <- train(classe ~ .,
+                  data = training,
+                  method="gbm",
+                  trControl = trainControl(method = "cv", 5),
+                  verbose = FALSE)
+
+prediction.gbm <- predict(model.gbm, newdata = testing)
+
+cfMatrix.gbm <- confusionMatrix(prediction.gbm, testing$classe)
+cfMatrix.gbm
+```
+
+```{r, cache = TRUE}
+plot(cfMatrix.gbm$table,
+     main = "Confusion Matrix - Gen. Boosted Reg. Model",
+     sub = paste0("Accuracy: ", round(cfMatrix.gbm$overall['Accuracy'], 4)))
+```
+
+## Results
+Finally, we can predict the test data set with our choosen model, which is the **random forests** in our case as it showed a higher accuracy.
+```{r, cache = TRUE}
+prediction.test <- predict(model.rf, newdata = data.test)
+prediction.test
+```
+
+```{r, cache = TRUE}
+sample.error <- 1 - cfMatrix.rf$overall['Accuracy']
+sample.error
+```
+The out of sample error is usually bigger than the in-sample error. Therefore it can be assumed that it will be (slightly) bigger than **`r sample.error`%**.
